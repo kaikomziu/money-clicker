@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="クリックでお金を稼ぐシンプルなCookie Clicker風クリッカーゲーム。転生とアップグレードツリー付き。">
+<meta name="description" content="クリックでお金を稼ぐCookie Clicker風クリッカーゲーム。20種の建物・転生とアップグレードツリー・180以上の実績・金貨ボーナス。">
 <title>MONEY CLICKER</title>
 <link rel="canonical" href="https://kaikomziu.github.io/money-clicker/">
 <meta property="og:title" content="MONEY CLICKER">
-<meta property="og:description" content="クリックでお金を稼ぐシンプルなクリッカーゲーム。転生とアップグレードツリー付き。">
+<meta property="og:description" content="クリックでお金を稼ぐクリッカーゲーム。建物・転生ツリー・実績・金貨ボーナス。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://kaikomziu.github.io/money-clicker/">
 <style>
@@ -17,6 +17,7 @@
     --bar:#7ad0ff;
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  [hidden]{display:none!important}
   body{
     font-family:"Segoe UI",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif;
     background:radial-gradient(1200px 600px at 50% -10%,#17351f,#0d1912 60%);
@@ -26,11 +27,17 @@
   header{grid-column:1/-1;text-align:center;padding:6px 0 2px}
   h1{font-size:clamp(24px,5vw,40px);letter-spacing:.08em;color:var(--gold);text-shadow:0 2px 0 #7a5c00}
   .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .ticker{
+    grid-column:1/-1;background:#0b1f16;border:1px solid var(--line);border-radius:10px;
+    padding:7px 12px;font-size:12px;color:var(--muted);overflow:hidden;white-space:nowrap;
+    text-overflow:ellipsis;min-height:30px;
+  }
+  .ticker b{color:var(--green)}
 
   .clicker{
     background:linear-gradient(180deg,var(--panel),var(--panel2));
     border:1px solid var(--line);border-radius:16px;padding:20px;text-align:center;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
   }
   .money{font-size:clamp(30px,7vw,52px);font-weight:800;color:var(--green);text-shadow:0 0 18px rgba(61,220,132,.35)}
   .rate{color:var(--muted);font-size:14px}
@@ -44,8 +51,13 @@
   .perclick{color:var(--gold);font-weight:700}
   .bars{color:var(--bar);font-weight:700}
 
+  .buffbar{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;min-height:0}
+  .buff{background:#3a2a00;border:1px solid var(--gold);color:var(--gold);border-radius:20px;
+    padding:3px 10px;font-size:11px;font-weight:800;animation:pulse 1s infinite alternate}
+  @keyframes pulse{to{box-shadow:0 0 12px rgba(255,210,63,.6)}}
+
   .rebirth-btn{
-    margin-top:4px;padding:10px 18px;border:1px solid var(--bar);border-radius:12px;
+    margin-top:2px;padding:9px 18px;border:1px solid var(--bar);border-radius:12px;
     background:linear-gradient(180deg,#123a4d,#0d2a38);color:var(--bar);font-weight:800;
     cursor:pointer;font-size:14px;transition:transform .05s,background .1s;
   }
@@ -57,11 +69,15 @@
     background:linear-gradient(180deg,var(--panel),var(--panel2));
     border:1px solid var(--line);border-radius:16px;padding:14px;
   }
-  .tabs{display:flex;gap:8px;margin-bottom:10px}
-  .tab{flex:1;padding:8px;border:1px solid var(--line);background:#0e2016;color:var(--muted);
-    border-radius:10px;cursor:pointer;font-weight:700;font-size:13px}
+  .tabs{display:flex;gap:6px;margin-bottom:8px}
+  .tab{flex:1;padding:8px 4px;border:1px solid var(--line);background:#0e2016;color:var(--muted);
+    border-radius:10px;cursor:pointer;font-weight:700;font-size:12px}
   .tab.active{background:var(--green);color:#06231a;border-color:var(--green)}
-  .list{display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto}
+  .bulk{display:flex;gap:6px;margin-bottom:8px}
+  .bulk button{flex:1;padding:5px;border:1px solid var(--line);background:#0e2016;color:var(--muted);
+    border-radius:8px;cursor:pointer;font-weight:700;font-size:12px}
+  .bulk button.active{background:#1c3a2a;color:var(--gold);border-color:var(--gold)}
+  .list{display:flex;flex-direction:column;gap:8px;max-height:62vh;overflow-y:auto}
   .item{
     display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;
     padding:10px;border:1px solid var(--line);border-radius:12px;background:#0e2016;
@@ -72,11 +88,27 @@
   .item.locked{opacity:.4;cursor:not-allowed}
   .item .ic{font-size:28px;text-align:center}
   .item .nm{font-weight:700}
-  .item .ds{font-size:12px;color:var(--muted)}
   .item .rt{font-size:11px;color:var(--green)}
   .item .cost{text-align:right;font-weight:800;color:var(--gold);white-space:nowrap}
   .item .own{font-size:11px;color:var(--muted);text-align:right}
   .item.afford .cost{color:var(--green)}
+
+  /* 実績グリッド */
+  .achhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;font-size:12px;color:var(--muted)}
+  .achhead b{color:var(--gold);font-size:14px}
+  .achgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px;
+    max-height:60vh;overflow-y:auto;padding-right:4px}
+  .ach{aspect-ratio:1;border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;
+    justify-content:center;font-size:20px;background:#0c1c14;position:relative;cursor:help}
+  .ach.got{background:#123a29;border-color:var(--green);box-shadow:0 0 8px rgba(61,220,132,.25)}
+  .ach.locked{filter:grayscale(1) brightness(.5);opacity:.5}
+  .ach .tip{
+    position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+    background:#06140d;border:1px solid var(--line);border-radius:8px;padding:6px 8px;
+    width:150px;font-size:11px;color:var(--text);text-align:center;display:none;z-index:5;
+  }
+  .ach .tip b{color:var(--gold);display:block;margin-bottom:2px}
+  .ach:hover .tip{display:block}
 
   .stats{grid-column:1/-1;background:linear-gradient(180deg,var(--panel),var(--panel2));
     border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-wrap:wrap;gap:14px;
@@ -97,32 +129,44 @@
     max-width:90vw;text-align:center}
   .toast.show{opacity:1}
 
-  /* ===== 転生ツリー オーバーレイ ===== */
-  .overlay{
-    position:fixed;inset:0;background:rgba(4,12,9,.9);z-index:100;
-    display:flex;flex-direction:column;padding:14px;
+  /* 金貨 */
+  .goldcoin{
+    position:fixed;width:64px;height:64px;border:none;border-radius:50%;cursor:pointer;z-index:80;
+    background:radial-gradient(circle at 35% 30%,#fff3c0,#ffd23f 45%,#b98900 100%);
+    box-shadow:0 0 24px rgba(255,210,63,.8),0 6px 16px rgba(0,0,0,.5);
+    font-size:34px;line-height:64px;text-align:center;animation:coinbob 1.4s infinite alternate ease-in-out;
   }
+  @keyframes coinbob{from{transform:scale(.9) rotate(-8deg)}to{transform:scale(1.05) rotate(8deg)}}
+
+  /* 実績ポップ */
+  .achpop-wrap{position:fixed;left:14px;bottom:14px;z-index:70;display:flex;flex-direction:column;gap:8px}
+  .achpop{
+    background:linear-gradient(180deg,#1a3a29,#123021);border:1px solid var(--green);border-radius:12px;
+    padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.5);
+    animation:slidein .35s ease-out;max-width:78vw;
+  }
+  .achpop .pi{font-size:26px}
+  .achpop .pt{font-size:11px;color:var(--muted)}
+  .achpop .pn{font-weight:800;color:var(--green)}
+  @keyframes slidein{from{transform:translateX(-120%);opacity:0}}
+
+  /* 転生ツリー オーバーレイ */
+  .overlay{position:fixed;inset:0;background:rgba(4,12,9,.9);z-index:100;display:flex;flex-direction:column;padding:14px}
   .overlay[hidden]{display:none}
   .ov-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
   .ov-head h2{color:var(--bar);font-size:18px}
   .ov-head .info{font-size:12px;color:var(--muted)}
   .ov-head .info b{color:var(--bar)}
-  .ov-close{border:1px solid var(--line);background:#0e2016;color:var(--text);border-radius:8px;
-    padding:6px 12px;cursor:pointer}
+  .ov-close{border:1px solid var(--line);background:#0e2016;color:var(--text);border-radius:8px;padding:6px 12px;cursor:pointer}
   .ov-actions{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
-  .ov-actions button{border:1px solid var(--bar);background:#123a4d;color:var(--bar);border-radius:10px;
-    padding:8px 14px;cursor:pointer;font-weight:800}
+  .ov-actions button{border:1px solid var(--bar);background:#123a4d;color:var(--bar);border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:800}
   .ov-actions button:disabled{opacity:.4;cursor:not-allowed}
   .ov-actions .respec{border-color:var(--line);background:#0e2016;color:var(--muted);font-weight:600}
-
   .tree-scroll{flex:1;overflow:auto;border:1px solid var(--line);border-radius:12px;background:#0a1a12}
-  .tree{position:relative;width:640px;height:600px;margin:0 auto}
+  .tree{position:relative;width:700px;height:640px;margin:0 auto}
   .tree svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-  .tnode{
-    position:absolute;transform:translate(-50%,-50%);width:120px;
-    border:1px solid var(--line);border-radius:10px;background:#102820;
-    padding:7px 8px;font-size:11px;cursor:pointer;text-align:center;transition:transform .05s;
-  }
+  .tnode{position:absolute;transform:translate(-50%,-50%);width:120px;border:1px solid var(--line);
+    border-radius:10px;background:#102820;padding:7px 8px;font-size:11px;cursor:pointer;text-align:center;transition:transform .05s}
   .tnode:active{transform:translate(-50%,-50%) scale(.96)}
   .tnode .tn{font-weight:800;font-size:11px;color:var(--text);line-height:1.25}
   .tnode .tc{margin-top:3px;font-weight:800;color:var(--gold)}
@@ -142,9 +186,12 @@
     <div class="sub">クリックしてお金を稼ごう</div>
   </header>
 
+  <div class="ticker" id="ticker">…</div>
+
   <section class="clicker">
     <div class="money" id="money">$0</div>
     <div class="rate" id="rate">$0 / 秒</div>
+    <div class="buffbar" id="buffbar"></div>
     <button id="coin">🪙</button>
     <div class="rate">1クリック <span class="perclick" id="perclick">$1</span></div>
     <div class="rate" id="barLine" hidden>所持 <span class="bars" id="barsOwned">🥇0</span></div>
@@ -156,16 +203,27 @@
 
   <section class="shop">
     <div class="tabs">
-      <button class="tab active" data-tab="biz">ビジネス</button>
-      <button class="tab" data-tab="click">クリック強化</button>
+      <button class="tab active" data-tab="biz">建物</button>
+      <button class="tab" data-tab="click">クリック</button>
+      <button class="tab" data-tab="ach" id="achTab">実績</button>
+    </div>
+    <div class="bulk" id="bulk">
+      <button data-n="1" class="active">×1</button>
+      <button data-n="10">×10</button>
+      <button data-n="100">×100</button>
+    </div>
+    <div class="achhead" id="achHead" hidden>
+      <span>ホバーで詳細</span>
+      <span>解除 <b id="achCount">0 / 0</b> ／ ボーナス <b id="achBonus">×1.00</b></span>
     </div>
     <div class="list" id="list"></div>
+    <div class="achgrid" id="achGrid" hidden></div>
   </section>
 
   <section class="stats" id="statsBox"></section>
 
   <footer>
-    <span id="ver">v1.1.0</span>
+    <span id="ver">v1.2.0</span>
     <button id="resetBtn">リセット</button>
   </footer>
 </div>
@@ -173,9 +231,7 @@
 <div class="overlay" id="rebirthView" hidden>
   <div class="ov-head">
     <h2>🔁 転生 ─ アップグレードツリー</h2>
-    <div class="info">
-      所持 <b id="ovBars">🥇0</b> ／ 転生回数 <b id="ovCount">0</b>
-    </div>
+    <div class="info">所持 <b id="ovBars">🥇0</b> ／ 転生回数 <b id="ovCount">0</b></div>
     <button class="ov-close" id="ovClose">閉じる</button>
   </div>
   <div class="ov-actions">
@@ -188,6 +244,7 @@
   </div>
 </div>
 
+<div class="achpop-wrap" id="achPopWrap"></div>
 <div class="toast" id="toast"></div>
 
 <script src="js/version.js"></script>
