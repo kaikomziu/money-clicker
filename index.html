@@ -138,6 +138,31 @@
   }
   @keyframes coinbob{from{transform:scale(.9) rotate(-8deg)}to{transform:scale(1.05) rotate(8deg)}}
 
+  /* ランキング */
+  .rankbox{display:flex;flex-direction:column;gap:8px}
+  .rankrow-in{display:flex;gap:6px}
+  .rankrow-in input{flex:1;background:#0e2016;border:1px solid var(--line);border-radius:8px;
+    padding:8px;color:var(--text);font-size:13px}
+  .rankrow-in button{border:1px solid var(--green);background:#123a29;color:var(--green);
+    border-radius:8px;padding:8px 12px;cursor:pointer;font-weight:700;font-size:12px;white-space:nowrap}
+  .rankme{font-size:12px;color:var(--muted);background:#0e2016;border:1px solid var(--line);
+    border-radius:8px;padding:8px}
+  .rankme b{color:var(--gold)}
+  .ranklist{display:flex;flex-direction:column;gap:6px;max-height:48vh;overflow-y:auto}
+  .rankrow{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;
+    padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#0e2016;font-size:12px}
+  .rankrow.me{border-color:var(--gold);background:#2a2408}
+  .rankrow .rk{color:var(--muted);font-weight:800;text-align:center}
+  .rankrow:nth-child(1) .rk{color:#ffd23f}
+  .rankrow:nth-child(2) .rk{color:#cfd8dc}
+  .rankrow:nth-child(3) .rk{color:#d7a06a}
+  .rankrow .rn{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rankrow .rv{text-align:right}
+  .rankrow .rv b{display:block;color:var(--green)}
+  .rankrow .rv span{font-size:10px;color:var(--muted)}
+  .rankrefresh{align-self:flex-end;background:none;border:1px solid var(--line);color:var(--muted);
+    border-radius:8px;padding:4px 10px;cursor:pointer;font-size:11px}
+
   /* 実績ポップ */
   .achpop-wrap{position:fixed;left:14px;bottom:14px;z-index:70;display:flex;flex-direction:column;gap:8px}
   .achpop{
@@ -206,6 +231,7 @@
       <button class="tab active" data-tab="biz">建物</button>
       <button class="tab" data-tab="click">クリック</button>
       <button class="tab" data-tab="ach" id="achTab">実績</button>
+      <button class="tab" data-tab="rank">🌐ランク</button>
     </div>
     <div class="bulk" id="bulk">
       <button data-n="1" class="active">×1</button>
@@ -218,6 +244,15 @@
     </div>
     <div class="list" id="list"></div>
     <div class="achgrid" id="achGrid" hidden></div>
+    <div class="rankbox" id="rankBox" hidden>
+      <div class="rankrow-in">
+        <input id="rankName" maxlength="12" placeholder="なまえ（12文字まで）">
+        <button id="rankSave">保存して送信</button>
+      </div>
+      <div class="rankme" id="rankMe">読み込み中…</div>
+      <button class="rankrefresh" id="rankRefresh">🔄 更新</button>
+      <div class="ranklist" id="rankList">読み込み中…</div>
+    </div>
   </section>
 
   <section class="stats" id="statsBox"></section>
@@ -247,6 +282,7 @@
 <div class="achpop-wrap" id="achPopWrap"></div>
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/version.js"></script>
 <script src="js/game.js"></script>
 </body>

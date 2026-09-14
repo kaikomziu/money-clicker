@@ -3,6 +3,62 @@
 
   const SAVE_KEY = "moneyclicker_v1";
   const REBIRTH_MIN = 1_000_000;
+  const TEST_MODE = /[?&]test\b/.test(location.search); // ?test では世界ランキングに送信しない
+
+  // ===== 世界ランキング (Supabase) =====
+  const Ranking = (() => {
+    const SUPABASE_URL = "https://kifnzvktwbomxthzvvgy.supabase.co";
+    // 同プロジェクトで書き込みに使われている従来形式(JWT)のanon key。
+    // 新形式のpublishable keyはINSERTが403で弾かれるため使わない。
+    const KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpZm56dmt0d2JvbXh0aHp2dmd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4MzgxMzgsImV4cCI6MjA5MzQxNDEzOH0.M7nXP-u--6J_6rRpgz1cJj21_7KX6MtfTmZy77Xf_IE";
+    const TABLE = "moneyclicker_scores";
+    let client = null;
+    function sb() {
+      if (client) return client;
+      if (!window.supabase || !window.supabase.createClient) return null;
+      // kaikomziu.github.io は全ゲーム共通オリジン(localStorage共有)。
+      // 他ゲームのSupabaseログインセッションを拾って authenticated ロールで
+      // 送信してしまわないよう、認証状態を一切持たせない。
+      client = window.supabase.createClient(SUPABASE_URL, KEY, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        global: { headers: { Authorization: "Bearer " + KEY } },
+      });
+      return client;
+    }
+    async function fetchTop(limit = 50) {
+      const c = sb(); if (!c) throw new Error("接続できませんでした");
+      const { data, error } = await c.from(TABLE)
+        .select("name,lifetime_earned,rebirths,bars,achievements")
+        .order("lifetime_earned", { ascending: false })
+        .limit(limit);
+      if (error) throw error;
+      return data || [];
+    }
+    async function estimateRank(v) {
+      const c = sb(); if (!c) return null;
+      const { count, error } = await c.from(TABLE)
+        .select("id", { count: "exact", head: true })
+        .gt("lifetime_earned", v);
+      if (error) return null;
+      return (count || 0) + 1;
+    }
+    async function submit(id, name, v, rebirths, bars, achievements) {
+      const c = sb(); if (!c) throw new Error("接続できませんでした");
+      const cleanName = (String(name || "").trim().slice(0, 12)) || "名無し";
+      if (!(v >= 0) || !isFinite(v)) throw new Error("不正なスコアです");
+      const row = {
+        id, name: cleanName,
+        lifetime_earned: v,
+        rebirths: Math.max(0, Math.floor(rebirths || 0)),
+        bars: Math.max(0, Math.floor(bars || 0)),
+        achievements: Math.max(0, Math.floor(achievements || 0)),
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await c.from(TABLE).upsert(row, { onConflict: "id" });
+      if (error) throw error;
+    }
+    return { fetchTop, estimateRank, submit };
+  })();
 
   // ===== 建物（自動収入）=====
   const BIZ = [
@@ -267,7 +323,11 @@
   const rebirthOpen = $("#rebirthOpen"), rebirthHint = $("#rebirthHint");
   const view = $("#rebirthView"), treeEl = $("#tree"), treeLines = $("#treeLines");
   const tickerEl = $("#ticker"), achPopWrap = $("#achPopWrap");
+  const rankBox = $("#rankBox"), rankList = $("#rankList"), rankMe = $("#rankMe");
+  const rankNameInput = $("#rankName");
   let tab = "biz", bulkN = 1;
+
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   // ===== ショップ =====
   function buy(list, map, it) {
@@ -288,12 +348,14 @@
   }
 
   function renderShop() {
-    const showAch = tab === "ach";
-    listEl.hidden = showAch;
+    const showAch = tab === "ach", showRank = tab === "rank";
+    listEl.hidden = showAch || showRank;
     achGrid.hidden = !showAch;
     achHead.hidden = !showAch;
-    $("#bulk").hidden = showAch;
+    rankBox.hidden = !showRank;
+    $("#bulk").hidden = showAch || showRank;
     if (showAch) return renderAch();
+    if (showRank) return;
 
     const data = tab === "biz" ? BIZ : CLICKS;
     const map = tab === "biz" ? state.biz : state.click;
@@ -328,6 +390,61 @@
       el.className = "ach " + (has ? "got" : "locked");
       el.innerHTML = `${a.ic || "🏅"}<div class="tip"><b>${has ? a.nm : "？？？"}</b>${a.desc}</div>`;
       achGrid.appendChild(el);
+    }
+  }
+
+  // ===== ランキング (プレイヤー識別・送信・表示) =====
+  let pid = null, myName = "";
+  function loadIdentity() {
+    try {
+      pid = localStorage.getItem("moneyclicker_pid");
+      if (!pid) {
+        pid = (crypto.randomUUID ? crypto.randomUUID() : "mc-" + Date.now() + "-" + Math.random().toString(36).slice(2));
+        localStorage.setItem("moneyclicker_pid", pid);
+      }
+    } catch (e) { pid = pid || ("mc-" + Date.now()); }
+    try { myName = localStorage.getItem("moneyclicker_name") || ""; } catch (e) {}
+    if (rankNameInput) rankNameInput.value = myName;
+  }
+  let lastSubmitEarned = -1, submitting = false;
+  async function trySubmit(force) {
+    if (TEST_MODE || !pid) return;
+    if (!myName) return; // なまえ未設定なら送らない
+    if (!force && state.lifetimeEarned <= lastSubmitEarned * 1.02 + 1) return;
+    if (submitting) return;
+    submitting = true;
+    try {
+      await Ranking.submit(pid, myName, state.lifetimeEarned, state.rebirths, state.bars, Object.keys(state.ach).length);
+      lastSubmitEarned = state.lifetimeEarned;
+    } catch (e) { /* オフライン等は無視して次回に任せる */ }
+    submitting = false;
+  }
+  async function renderRank() {
+    if (TEST_MODE) {
+      rankMe.textContent = "🧪 テストモード：ランキングには送信されません";
+    } else if (!myName) {
+      rankMe.textContent = "なまえを入力して送信すると、あなたの順位が世界ランキングに載ります。";
+    } else {
+      rankMe.innerHTML = `<b>${esc(myName)}</b> の推定順位を取得中…`;
+      Ranking.estimateRank(state.lifetimeEarned).then((r) => {
+        if (tab !== "rank") return;
+        rankMe.innerHTML = r
+          ? `<b>${esc(myName)}</b> の推定順位: <b>${fmtInt(r)}位</b> ／ 累計獲得額 ${fmt(state.lifetimeEarned)}`
+          : `順位を取得できませんでした（累計獲得額 ${fmt(state.lifetimeEarned)}）`;
+      }).catch(() => { if (tab === "rank") rankMe.textContent = "順位の取得に失敗しました。"; });
+    }
+    rankList.textContent = "読み込み中…";
+    try {
+      const top = await Ranking.fetchTop(50);
+      if (tab !== "rank") return;
+      rankList.innerHTML = top.length ? top.map((r, i) => `
+        <div class="rankrow${r.name === myName ? " me" : ""}">
+          <span class="rk">${i + 1}</span>
+          <span class="rn">${esc(r.name)}</span>
+          <span class="rv"><b>${fmt(r.lifetime_earned)}</b><span>🔁${fmtInt(r.rebirths || 0)} 🥇${fmtInt(r.bars || 0)} 🏅${fmtInt(r.achievements || 0)}</span></span>
+        </div>`).join("") : "まだ誰も記録していません。あなたが一番乗りです！";
+    } catch (e) {
+      if (tab === "rank") rankList.textContent = "読み込みに失敗しました。接続を確認して更新してください。";
     }
   }
 
@@ -445,6 +562,7 @@
     document.querySelectorAll("#bulk button").forEach((b, i) => b.classList.toggle("active", i === 0));
     renderTree(); renderShop(); renderStats(); renderTop();
     checkAch(); save();
+    trySubmit(true);
     toast(`転生しました！ ${bar(g)} 獲得（通算 ${state.rebirths} 回）`);
   }
 
@@ -565,8 +683,19 @@
       t.classList.add("active");
       tab = t.dataset.tab;
       renderShop();
+      if (tab === "rank") renderRank();
     });
   });
+  $("#rankSave").addEventListener("click", () => {
+    const v = (rankNameInput.value || "").trim().slice(0, 12);
+    myName = v;
+    try { localStorage.setItem("moneyclicker_name", myName); } catch (e) {}
+    rankNameInput.value = myName;
+    if (!myName) { toast("なまえを入力してください"); return; }
+    trySubmit(true).then(() => renderRank());
+    toast("なまえを保存しました。送信しています…");
+  });
+  $("#rankRefresh").addEventListener("click", renderRank);
   document.querySelectorAll("#bulk button").forEach((b) => {
     b.addEventListener("click", () => {
       document.querySelectorAll("#bulk button").forEach((x) => x.classList.remove("active"));
@@ -588,7 +717,7 @@
 
   // ===== ループ =====
   // setInterval ベース（バックグラウンドでも動作し、離席分を実時間で追従）
-  let acc = 0, newsAcc = 0, lastTick = Date.now();
+  let acc = 0, newsAcc = 0, rankAcc = 0, lastTick = Date.now();
   function loop() {
     const now = Date.now();
     let dt = (now - lastTick) / 1000;
@@ -611,6 +740,8 @@
       if (!view.hidden) renderTree();
     }
     if (newsAcc > 9) { newsAcc = 0; rollNews(); }
+    rankAcc += dt;
+    if (rankAcc > 45) { rankAcc = 0; trySubmit(false); }
   }
 
   // ===== オフライン収入 =====
@@ -628,11 +759,13 @@
 
   // ===== 起動 =====
   load();
+  loadIdentity();
   ACH = buildAch();
   offlineEarn();
   $("#ver").textContent = "v" + (window.APP_VERSION || "1.2.0");
   renderTop(); renderShop(); renderStats(); renderBuffs(); rollNews();
   checkAch();
+  trySubmit(true);
   setInterval(loop, 200);
   setInterval(save, 10000);
   window.addEventListener("beforeunload", save);
