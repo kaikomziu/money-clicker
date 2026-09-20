@@ -3,6 +3,7 @@
 
   const SAVE_KEY = "moneyclicker_v1";
   const REBIRTH_MIN = 1_000_000;
+  const INFINITY_CAP = 1e308; // ここまで貯めると次の段階(♾️ Infinity集め)に進める
   const TEST_MODE = /[?&]test\b/.test(location.search); // ?test では世界ランキングに送信しない
 
   // ===== 世界ランキング (Supabase) =====
@@ -28,7 +29,7 @@
     async function fetchTop(limit = 50) {
       const c = sb(); if (!c) throw new Error("接続できませんでした");
       const { data, error } = await c.from(TABLE)
-        .select("name,lifetime_earned,rebirths,bars,achievements")
+        .select("name,lifetime_earned,rebirths,bars,achievements,infinities")
         .order("lifetime_earned", { ascending: false })
         .limit(limit);
       if (error) throw error;
@@ -42,7 +43,7 @@
       if (error) return null;
       return (count || 0) + 1;
     }
-    async function submit(id, name, v, rebirths, bars, achievements) {
+    async function submit(id, name, v, rebirths, bars, achievements, infinities) {
       const c = sb(); if (!c) throw new Error("接続できませんでした");
       const cleanName = (String(name || "").trim().slice(0, 12)) || "名無し";
       if (!(v >= 0) || !isFinite(v)) throw new Error("不正なスコアです");
@@ -52,6 +53,7 @@
         rebirths: Math.max(0, Math.floor(rebirths || 0)),
         bars: Math.max(0, Math.floor(bars || 0)),
         achievements: Math.max(0, Math.floor(achievements || 0)),
+        infinities: Math.max(0, Math.floor(infinities || 0)),
         updated_at: new Date().toISOString(),
       };
       const { error } = await c.from(TABLE).upsert(row, { onConflict: "id" });
@@ -126,19 +128,24 @@
   // ===== 数字表示 =====
   const UNITS = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc",
     "UDc", "DDc", "TDc", "QaDc", "QiDc", "SxDc", "SpDc", "OcDc", "NoDc", "Vg"];
-  function fmt(n) {
-    if (!isFinite(n)) return "$∞";
-    if (n < 0) return "-" + fmt(-n);
+  // 名前つき単位(〜10^66)を超えたら指数表記にフォールバック(INFINITY到達=1e308まで扱うため)
+  function fmtNum(n) {
+    if (!isFinite(n)) return "∞";
+    if (n < 0) return "-" + fmtNum(-n);
     if (n < 1000) {
       const d = n < 10 && n % 1 !== 0 ? 1 : 0;
-      return "$" + n.toLocaleString("en-US", { maximumFractionDigits: d });
+      return n.toLocaleString("en-US", { maximumFractionDigits: d });
     }
-    let u = 0;
-    while (n >= 1000 && u < UNITS.length - 1) { n /= 1000; u++; }
-    return "$" + n.toFixed(2) + UNITS[u];
+    const groups = Math.floor(Math.log10(n) / 3);
+    if (groups >= UNITS.length) return n.toExponential(2).replace("e+", "e");
+    let v = n, u = 0;
+    while (v >= 1000 && u < UNITS.length - 1) { v /= 1000; u++; }
+    return v.toFixed(2) + UNITS[u];
   }
+  const fmt = (n) => (n < 0 ? "-" + fmt(-n) : "$" + fmtNum(n));
   const fmtInt = (n) => Math.floor(n).toLocaleString("en-US");
-  const bar = (n) => "🥇" + fmtInt(n);
+  const bar = (n) => "🥇" + fmtNum(n);
+  const inf = (n) => "♾️" + fmtNum(n);
 
   // ===== 実績 =====
   function buildAch() {
@@ -204,6 +211,11 @@
       id: `autoclick_${c}`, ic: "🤖", nm: `オート ${fmtInt(c)} 回`,
       desc: `オートクリッカーで累計 ${fmtInt(c)} 回クリック`, check: (s) => (s.autoClicks || 0) >= c,
     }));
+    push({ id: "inf_reach", ic: "♾️", nm: "INFINITYに到達", desc: "所持金が $1e308(INFINITY)に到達する", check: (s) => s.money >= INFINITY_CAP || (s.infinities || 0) >= 1 });
+    [1, 5, 10, 25, 50, 100, 250, 500, 1000].forEach((c) => push({
+      id: `inf_${c}`, ic: "♾️", nm: `Infinity ${fmtInt(c)}`,
+      desc: `♾️ を ${fmtInt(c)} 個 集める`, check: (s) => (s.infinities || 0) >= c,
+    }));
     push({ id: "half", ic: "🎯", nm: "コレクター", desc: "実績を半分 解除", check: (s) => Object.keys(s.ach).length >= Math.floor(A.length / 2) });
     push({ id: "allach", ic: "🌟", nm: "完全制覇", desc: "他の実績をすべて解除", check: (s) => Object.keys(s.ach).length >= A.length - 1 });
     return A;
@@ -246,6 +258,7 @@
     ach: {}, goldClicks: 0, feverGold: 0,
     lifetimeEarned: 0, totalClicks: 0,
     autoClickOn: false, autoClicks: 0, autoClickEverUsed: false,
+    infinities: 0,
     start: Date.now(), last: Date.now(),
   });
   const AUTO_CLICK_RATE = 5; // オートクリッカーが1秒間にクリックする回数
@@ -283,6 +296,7 @@
       if (e.goldPower) o.goldPower *= e.goldPower;
       if (e.achPower) o.achPower *= e.achPower;
     }
+    o.global *= 1 + (state.infinities || 0) * 0.02; // ♾️ 1個につき永久に全収入 +2%
     return o;
   }
   function achMul() {
@@ -328,6 +342,8 @@
   const statsBox = $("#statsBox"), toastEl = $("#toast"), buffbar = $("#buffbar");
   const barLine = $("#barLine"), barsOwnedEl = $("#barsOwned");
   const rebirthOpen = $("#rebirthOpen"), rebirthHint = $("#rebirthHint");
+  const infLine = $("#infLine"), infOwnedEl = $("#infOwned"), infHint = $("#infHint");
+  const infinityOpen = $("#infinityOpen");
   const view = $("#rebirthView"), treeEl = $("#tree"), treeLines = $("#treeLines");
   const tickerEl = $("#ticker"), achPopWrap = $("#achPopWrap");
   const rankBox = $("#rankBox"), rankList = $("#rankList"), rankMe = $("#rankMe");
@@ -422,7 +438,7 @@
     if (submitting) return;
     submitting = true;
     try {
-      await Ranking.submit(pid, myName, state.lifetimeEarned, state.rebirths, state.bars, Object.keys(state.ach).length);
+      await Ranking.submit(pid, myName, state.lifetimeEarned, state.rebirths, state.bars, Object.keys(state.ach).length, state.infinities);
       lastSubmitEarned = state.lifetimeEarned;
     } catch (e) { /* オフライン等は無視して次回に任せる */ }
     submitting = false;
@@ -449,7 +465,7 @@
         <div class="rankrow${r.name === myName ? " me" : ""}">
           <span class="rk">${i + 1}</span>
           <span class="rn">${esc(r.name)}</span>
-          <span class="rv"><b>${fmt(r.lifetime_earned)}</b><span>🔁${fmtInt(r.rebirths || 0)} 🥇${fmtInt(r.bars || 0)} 🏅${fmtInt(r.achievements || 0)}</span></span>
+          <span class="rv"><b>${fmt(r.lifetime_earned)}</b><span>${Number(r.infinities) > 0 ? `♾️${fmtInt(r.infinities)} ` : ""}🔁${fmtInt(r.rebirths || 0)} 🥇${fmtNum(Number(r.bars) || 0)} 🏅${fmtInt(r.achievements || 0)}</span></span>
         </div>`).join("") : "まだ誰も記録していません。あなたが一番乗りです！";
     } catch (e) {
       if (tab === "rank") rankList.textContent = "読み込みに失敗しました。接続を確認して更新してください。";
@@ -467,6 +483,7 @@
       <div><span>実績</span><b>${Object.keys(state.ach).length}/${ACH.length} (×${achMul().toFixed(2)})</b></div>
       <div><span>転生回数</span><b>${state.rebirths}</b></div>
       <div><span>ゴールドバー</span><b>${bar(state.bars)}</b></div>
+      <div><span>Infinity</span><b>${inf(state.infinities || 0)}${state.infinities ? ` (×${(1 + state.infinities * 0.02).toFixed(2)})` : ""}</b></div>
       <div><span>金貨クリック</span><b>${fmtInt(state.goldClicks || 0)}</b></div>
       <div><span>クリック回数</span><b>${fmtInt(state.totalClicks)}</b></div>
       <div><span>オートクリック回数</span><b>${fmtInt(state.autoClicks || 0)}${state.autoClickOn ? " (稼働中)" : ""}</b></div>
@@ -497,6 +514,20 @@
       rebirthHint.textContent = g > 0 ? `今なら +${bar(g)}` : `あと ${fmt(REBIRTH_MIN - state.runEarned)} で1本`;
     }
     $("#achTab").textContent = "実績 " + Object.keys(state.ach).length;
+
+    const reachedInf = state.money >= INFINITY_CAP;
+    const infUnlocked = state.infinities > 0 || state.rebirths > 0 || reachedInf;
+    infLine.hidden = !infUnlocked;
+    infinityOpen.hidden = !reachedInf;
+    if (infUnlocked) {
+      if (reachedInf) {
+        infHint.textContent = `INFINITY到達！ 今なら +${inf(infinityGain())}`;
+      } else {
+        const pct = Math.max(0, Math.min(100, (Math.log10(Math.max(state.money, 1)) / Math.log10(INFINITY_CAP)) * 100));
+        infHint.textContent = `進捗 ${pct.toFixed(1)}%（$1e308到達で突入可）`;
+      }
+    }
+    infOwnedEl.textContent = inf(state.infinities || 0);
   }
 
   // ===== 転生ツリー描画 =====
@@ -573,6 +604,27 @@
     checkAch(); save();
     trySubmit(true);
     toast(`転生しました！ ${bar(g)} 獲得（通算 ${state.rebirths} 回）`);
+  }
+
+  // ===== ♾️ INFINITY(所持金が1e308＝倍精度の上限に到達した先の段階) =====
+  function infinityGain() {
+    // それまでの転生回数が多いほど、突入時にもらえる♾️が増える
+    return 1 + Math.floor((state.rebirths || 0) / 5);
+  }
+  function doInfinity() {
+    if (state.money < INFINITY_CAP) return;
+    const gain = infinityGain();
+    if (!confirm(`INFINITYに到達しました！\n${inf(gain)} を獲得し、所持金・建物・クリック強化・ゴールドバー・アップグレードツリー・転生回数がすべてリセットされます。\n（実績・ランキング成績・オートクリッカーの実績は維持されます）\n\n突入しますか？`)) return;
+    state.infinities = (state.infinities || 0) + gain;
+    Object.assign(state, fresh());
+    state.bars = 0; state.rebirths = 0; state.tree = {};
+    tab = "biz"; bulkN = 1;
+    document.querySelectorAll(".tab").forEach((x, i) => x.classList.toggle("active", i === 0));
+    document.querySelectorAll("#bulk button").forEach((b, i) => b.classList.toggle("active", i === 0));
+    renderTree(); renderShop(); renderStats(); renderTop();
+    checkAch(); save();
+    trySubmit(true);
+    toast(`♾️ INFINITY達成！ ${inf(gain)} を獲得しました（通算 ${inf(state.infinities)}）`);
   }
 
   // ===== 実績チェック =====
@@ -726,6 +778,7 @@
     });
   });
   rebirthOpen.addEventListener("click", () => { view.hidden = false; renderTree(); });
+  infinityOpen.addEventListener("click", doInfinity);
   $("#ovClose").addEventListener("click", () => { view.hidden = true; });
   view.addEventListener("click", (e) => { if (e.target === view) view.hidden = true; });
   $("#doRebirth").addEventListener("click", doRebirth);
@@ -794,7 +847,7 @@
   loadIdentity();
   ACH = buildAch();
   offlineEarn();
-  $("#ver").textContent = "v" + (window.APP_VERSION || "1.4.0");
+  $("#ver").textContent = "v" + (window.APP_VERSION || "1.5.0");
   renderTop(); renderShop(); renderStats(); renderBuffs(); rollNews();
   updateAutoClickBtn();
   checkAch();
