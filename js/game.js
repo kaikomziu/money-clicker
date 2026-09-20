@@ -161,7 +161,7 @@
     }));
     [10, 100, 1000, 1e4, 1e5, 1e6, 5e6, 1e7].forEach((c) => push({
       id: `click_${c}`, ic: "👆", nm: `${fmtInt(c)} クリック`,
-      desc: `累計 ${fmtInt(c)} 回クリック`, check: (s) => s.totalClicks >= c,
+      desc: `累計 ${fmtInt(c)} 回クリック（オート含む）`, check: (s) => s.totalClicks + (s.autoClicks || 0) >= c,
     }));
     [1, 2, 5, 10, 20, 50, 100, 200].forEach((r) => push({
       id: `reb_${r}`, ic: "🔁", nm: `転生 ${r} 回`,
@@ -199,6 +199,11 @@
     push({ id: "rich50", ic: "🤑", nm: "現ナマ", desc: "所持金 $50M を同時に保有", check: (s) => s.money >= 5e7 });
     push({ id: "rich1t", ic: "💰", nm: "億万長者どころか", desc: "所持金 $1T を同時に保有", check: (s) => s.money >= 1e12 });
     push({ id: "feverride", ic: "🔥", nm: "祭り", desc: "フィーバー中に金貨をもう1枚とる", check: (s) => (s.feverGold || 0) >= 1 });
+    push({ id: "autoclick_on", ic: "🤖", nm: "オートクリッカー起動", desc: "オートクリッカーを一度ONにする", check: (s) => !!s.autoClickEverUsed });
+    [100, 1000, 1e4, 1e5, 1e6, 1e7].forEach((c) => push({
+      id: `autoclick_${c}`, ic: "🤖", nm: `オート ${fmtInt(c)} 回`,
+      desc: `オートクリッカーで累計 ${fmtInt(c)} 回クリック`, check: (s) => (s.autoClicks || 0) >= c,
+    }));
     push({ id: "half", ic: "🎯", nm: "コレクター", desc: "実績を半分 解除", check: (s) => Object.keys(s.ach).length >= Math.floor(A.length / 2) });
     push({ id: "allach", ic: "🌟", nm: "完全制覇", desc: "他の実績をすべて解除", check: (s) => Object.keys(s.ach).length >= A.length - 1 });
     return A;
@@ -240,8 +245,10 @@
     bars: 0, rebirths: 0, tree: {},
     ach: {}, goldClicks: 0, feverGold: 0,
     lifetimeEarned: 0, totalClicks: 0,
+    autoClickOn: false, autoClicks: 0, autoClickEverUsed: false,
     start: Date.now(), last: Date.now(),
   });
+  const AUTO_CLICK_RATE = 5; // オートクリッカーが1秒間にクリックする回数
   let buffs = []; // {kind:'prod'|'click', mult, until, label}
 
   function load() {
@@ -325,6 +332,7 @@
   const tickerEl = $("#ticker"), achPopWrap = $("#achPopWrap");
   const rankBox = $("#rankBox"), rankList = $("#rankList"), rankMe = $("#rankMe");
   const rankNameInput = $("#rankName");
+  const autoClickBtn = $("#autoClickBtn");
   let tab = "biz", bulkN = 1;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -461,6 +469,7 @@
       <div><span>ゴールドバー</span><b>${bar(state.bars)}</b></div>
       <div><span>金貨クリック</span><b>${fmtInt(state.goldClicks || 0)}</b></div>
       <div><span>クリック回数</span><b>${fmtInt(state.totalClicks)}</b></div>
+      <div><span>オートクリック回数</span><b>${fmtInt(state.autoClicks || 0)}${state.autoClickOn ? " (稼働中)" : ""}</b></div>
       <div><span>プレイ時間</span><b>${h}時間${m}分</b></div>`;
   }
 
@@ -677,6 +686,18 @@
     if (tab !== "ach") renderShop();
     checkAch();
   });
+  function updateAutoClickBtn() {
+    autoClickBtn.textContent = state.autoClickOn
+      ? `🤖 オートクリッカー: ON（${AUTO_CLICK_RATE}回/秒）`
+      : "🤖 オートクリッカー: OFF";
+    autoClickBtn.classList.toggle("on", !!state.autoClickOn);
+  }
+  autoClickBtn.addEventListener("click", () => {
+    state.autoClickOn = !state.autoClickOn;
+    if (state.autoClickOn) state.autoClickEverUsed = true;
+    updateAutoClickBtn();
+    checkAch(); save();
+  });
   document.querySelectorAll(".tab").forEach((t) => {
     t.addEventListener("click", () => {
       document.querySelectorAll(".tab").forEach((x) => x.classList.remove("active"));
@@ -729,6 +750,12 @@
       const g = ps * dt;
       state.money += g; state.runEarned += g; state.lifetimeEarned += g;
     }
+    if (state.autoClickOn) {
+      const clicks = AUTO_CLICK_RATE * dt;
+      const gain = perClick() * clicks;
+      state.money += gain; state.runEarned += gain; state.lifetimeEarned += gain;
+      state.autoClicks = (state.autoClicks || 0) + clicks;
+    }
     if (!document.hidden && Date.now() > nextGold) spawnGold();
     renderTop(); renderBuffs();
     acc += dt; newsAcc += dt;
@@ -751,7 +778,12 @@
     const rate = E.offline ? 1 : 0.6;
     const elapsed = Math.min((Date.now() - (state.last || Date.now())) / 1000, capH * 3600);
     if (elapsed < 60) return;
-    const g = perSecond() * elapsed * rate;
+    let g = perSecond() * elapsed * rate;
+    if (state.autoClickOn) {
+      const clicks = AUTO_CLICK_RATE * elapsed * rate;
+      g += perClick() * clicks;
+      state.autoClicks = (state.autoClicks || 0) + clicks;
+    }
     if (g <= 0) return;
     state.money += g; state.runEarned += g; state.lifetimeEarned += g;
     toast(`おかえりなさい！ 不在中に ${fmt(g)} 稼ぎました（${Math.floor(elapsed / 60)}分・効率${Math.round(rate * 100)}%）`);
@@ -762,8 +794,9 @@
   loadIdentity();
   ACH = buildAch();
   offlineEarn();
-  $("#ver").textContent = "v" + (window.APP_VERSION || "1.2.0");
+  $("#ver").textContent = "v" + (window.APP_VERSION || "1.4.0");
   renderTop(); renderShop(); renderStats(); renderBuffs(); rollNews();
+  updateAutoClickBtn();
   checkAch();
   trySubmit(true);
   setInterval(loop, 200);
